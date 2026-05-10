@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Virtual Screen</title>
+
+<style>
+
+*{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+}
+
+body{
+    background:#000;
+    overflow:hidden;
+    font-family:Arial, sans-serif;
+}
+
+video{
+    width:100vw;
+    height:100vh;
+    object-fit:contain;
+    background:black;
+}
+
+/* top controls */
+
+#controls{
+
+    position:fixed;
+
+    top:15px;
+    left:50%;
+
+    transform:translateX(-50%);
+
+    display:flex;
+    gap:10px;
+    align-items:center;
+
+    background:rgba(0,0,0,0.55);
+
+    padding:10px;
+
+    border-radius:12px;
+
+    z-index:100;
+}
+
+#controls.hidden{
+    display:none;
+}
+
+select,
+button{
+
+    height:40px;
+
+    border:none;
+
+    border-radius:8px;
+
+    padding:0 14px;
+
+    font-size:14px;
+}
+
+select{
+    min-width:220px;
+}
+
+button{
+    cursor:pointer;
+    background:#2563eb;
+    color:white;
+}
+
+button:hover{
+    opacity:0.9;
+}
+
+/* status */
+
+#status{
+
+    position:fixed;
+
+    bottom:15px;
+    left:50%;
+
+    transform:translateX(-50%);
+
+    background:rgba(0,0,0,0.55);
+
+    color:white;
+
+    padding:8px 14px;
+
+    border-radius:10px;
+
+    font-size:13px;
+
+    z-index:100;
+}
+
+</style>
+</head>
+
+<body>
+
+<video
+    id="video"
+    autoplay
+    muted
+    playsinline
+></video>
+
+<div id="controls">
+
+    <select id="cameraSelect"></select>
+
+    <button id="startBtn">
+        Start
+    </button>
+
+    <button id="fullscreenBtn">
+        Fullscreen
+    </button>
+
+    <button id="hideBtn">
+        Hide UI
+    </button>
+
+</div>
+
+<div id="status">
+    Ready
+</div>
+
+<script>
+
+const video = document.getElementById('video');
+const cameraSelect = document.getElementById('cameraSelect');
+const statusBox = document.getElementById('status');
+const controls = document.getElementById('controls');
+
+let stream = null;
+let wakeLock = null;
+
+/* status */
+
+function setStatus(text){
+    statusBox.innerText = text;
+}
+
+/* anti sleep */
+
+async function enableWakeLock(){
+
+    try{
+
+        if('wakeLock' in navigator){
+
+            wakeLock =
+                await navigator.wakeLock.request('screen');
+        }
+
+    }catch(err){
+
+        console.log(err);
+    }
+}
+
+document.addEventListener(
+    'visibilitychange',
+    async () => {
+
+        if(document.visibilityState === 'visible'){
+            enableWakeLock();
+        }
+    }
+);
+
+/* load camera list */
+
+async function loadCameras(){
+
+    try{
+
+        const temp =
+            await navigator.mediaDevices.getUserMedia({
+                video:true
+            });
+
+        temp.getTracks().forEach(track => track.stop());
+
+        const devices =
+            await navigator.mediaDevices.enumerateDevices();
+
+        const cameras =
+            devices.filter(
+                device => device.kind === 'videoinput'
+            );
+
+        cameraSelect.innerHTML = '';
+
+        cameras.forEach((camera, index) => {
+
+            const option =
+                document.createElement('option');
+
+            option.value = camera.deviceId;
+
+            option.text =
+                camera.label ||
+                `Camera ${index + 1}`;
+
+            cameraSelect.appendChild(option);
+        });
+
+        setStatus("Camera Ready");
+
+    }catch(err){
+
+        console.log(err);
+
+        setStatus("Camera Error");
+    }
+}
+
+/* start camera */
+
+async function startCamera(){
+
+    try{
+
+        setStatus("Connecting...");
+
+        if(stream){
+            stream.getTracks().forEach(track => track.stop());
+        }
+
+        stream =
+            await navigator.mediaDevices.getUserMedia({
+
+                video:{
+                    deviceId:{
+                        exact:cameraSelect.value
+                    },
+
+                    width:{ideal:1920},
+                    height:{ideal:1080},
+
+                    frameRate:{ideal:30}
+                },
+
+                audio:false
+            });
+
+        video.srcObject = stream;
+
+        setStatus("Camera Live");
+
+    }catch(err){
+
+        console.log(err);
+
+        setStatus("Failed");
+    }
+}
+
+/* fullscreen */
+
+async function toggleFullscreen(){
+
+    if(!document.fullscreenElement){
+
+        await document.documentElement.requestFullscreen();
+
+    }else{
+
+        await document.exitFullscreen();
+    }
+}
+
+/* hide ui */
+
+function toggleUI(){
+
+    controls.classList.toggle('hidden');
+}
+
+/* events */
+
+document
+.getElementById('startBtn')
+.addEventListener('click', startCamera);
+
+document
+.getElementById('fullscreenBtn')
+.addEventListener('click', toggleFullscreen);
+
+document
+.getElementById('hideBtn')
+.addEventListener('click', toggleUI);
+
+/* init */
+
+async function init(){
+
+    await enableWakeLock();
+
+    await loadCameras();
+
+    setStatus("Ready");
+}
+
+init();
+
+</script>
+
+</body>
+</html>
