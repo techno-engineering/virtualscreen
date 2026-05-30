@@ -1,326 +1,164 @@
 <!DOCTYPE html>
-<html lang="id">
+<html>
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-<title>Virtual Screen</title>
+<meta charset="utf-8">
+<title>BLE Terminal</title>
 
 <style>
+body{
+    font-family: monospace;
+    margin:20px;
+}
 
-*{
-    margin:0;
-    padding:0;
+button{
+    padding:8px 16px;
+    margin:4px;
+}
+
+#terminal{
+    border:1px solid #888;
+    height:300px;
+    overflow-y:auto;
+    padding:10px;
+    white-space:pre-wrap;
+}
+
+#tx{
+    width:100%;
+    margin-top:10px;
+    padding:8px;
     box-sizing:border-box;
 }
-
-body{
-    background:#000;
-    overflow:hidden;
-    font-family:Arial, sans-serif;
-}
-
-video{
-    width:100vw;
-    height:100vh;
-    object-fit:contain;
-    display:block;
-    background:black;
-}
-
-/* top controls */
-
-#controls{
-
-    position:fixed;
-
-    top:15px;
-    left:50%;
-
-    transform:translateX(-50%);
-
-    display:flex;
-    gap:10px;
-    align-items:center;
-
-    background:rgba(0,0,0,0.55);
-
-    padding:10px;
-
-    border-radius:12px;
-
-    z-index:100;
-}
-
-#controls.hidden{
-    display:none;
-}
-
-select,
-button{
-
-    height:40px;
-
-    border:none;
-
-    border-radius:8px;
-
-    padding:0 14px;
-
-    font-size:14px;
-}
-
-select{
-    min-width:220px;
-}
-
-button{
-    cursor:pointer;
-    background:#2563eb;
-    color:white;
-}
-
-button:hover{
-    opacity:0.9;
-}
-
-/* status */
-
-#status{
-
-    position:fixed;
-
-    bottom:15px;
-    left:50%;
-
-    transform:translateX(-50%);
-
-    background:rgba(0,0,0,0.55);
-
-    color:white;
-
-    padding:8px 14px;
-
-    border-radius:10px;
-
-    font-size:13px;
-
-    z-index:100;
-}
-
 </style>
-</head>
 
+</head>
 <body>
 
-<video
-    id="video"
-    autoplay
-    muted
-    playsinline
-></video>
+<h2>BLE Terminal</h2>
 
-<div id="controls">
+<button onclick="connectBLE()">Connect</button>
+<button onclick="disconnectBLE()">Disconnect</button>
 
-    <select id="cameraSelect"></select>
+<div id="terminal"></div>
 
-    <button id="startBtn">
-        Start
-    </button>
-
-    <button id="fullscreenBtn">
-        Fullscreen
-    </button>
-
-    <button id="hideBtn">
-        Hide UI
-    </button>
-
-</div>
-
-<div id="status">
-    Ready
-</div>
+<input
+    id="tx"
+    type="text"
+    placeholder="Ketik pesan lalu Enter"
+>
 
 <script>
 
-const video = document.getElementById('video');
-const cameraSelect = document.getElementById('cameraSelect');
-const statusBox = document.getElementById('status');
-const controls = document.getElementById('controls');
+const SERVICE_UUID =
+"12345678-1234-1234-1234-1234567890ab";
 
-let stream = null;
-let wakeLock = null;
+const CHARACTERISTIC_UUID =
+"87654321-4321-4321-4321-ba0987654321";
 
-/* status */
+let device;
+let server;
+let characteristic;
 
-function setStatus(text){
-    statusBox.innerText = text;
+const terminal = document.getElementById("terminal");
+
+function log(text)
+{
+    terminal.textContent += text + "\n";
+    terminal.scrollTop = terminal.scrollHeight;
 }
 
-/* anti sleep */
-
-async function enableWakeLock(){
-
-    try{
-
-        if('wakeLock' in navigator){
-
-            wakeLock =
-                await navigator.wakeLock.request('screen');
-        }
-
-    }catch(err){
-
-        console.log(err);
-    }
-}
-
-document.addEventListener(
-    'visibilitychange',
-    async () => {
-
-        if(document.visibilityState === 'visible'){
-            enableWakeLock();
-        }
-    }
-);
-
-/* load camera list */
-
-async function loadCameras(){
-
-    try{
-
-        const temp =
-            await navigator.mediaDevices.getUserMedia({
-                video:true
-            });
-
-        temp.getTracks().forEach(track => track.stop());
-
-        const devices =
-            await navigator.mediaDevices.enumerateDevices();
-
-        const cameras =
-            devices.filter(
-                device => device.kind === 'videoinput'
-            );
-
-        cameraSelect.innerHTML = '';
-
-        cameras.forEach((camera, index) => {
-
-            const option =
-                document.createElement('option');
-
-            option.value = camera.deviceId;
-
-            option.text =
-                camera.label ||
-                `Camera ${index + 1}`;
-
-            cameraSelect.appendChild(option);
+async function connectBLE()
+{
+    try
+    {
+        device = await navigator.bluetooth.requestDevice({
+            filters: [{
+                services: [SERVICE_UUID]
+            }]
         });
 
-        setStatus("Camera Ready");
+        device.addEventListener(
+            'gattserverdisconnected',
+            () => log("Disconnected")
+        );
 
-    }catch(err){
+        log("Connecting...");
 
-        console.log(err);
+        server = await device.gatt.connect();
 
-        setStatus("Camera Error");
+        const service =
+            await server.getPrimaryService(
+                SERVICE_UUID
+            );
+
+        characteristic =
+            await service.getCharacteristic(
+                CHARACTERISTIC_UUID
+            );
+
+        await characteristic.startNotifications();
+
+        characteristic.addEventListener(
+            'characteristicvaluechanged',
+            handleNotification
+        );
+
+        log("Connected: " + device.name);
+    }
+    catch(err)
+    {
+        log("ERROR: " + err);
     }
 }
 
-/* start camera */
+function handleNotification(event)
+{
+    const value =
+        new TextDecoder().decode(
+            event.target.value
+        );
 
-async function startCamera(){
+    log("RX > " + value);
+}
 
-    try{
+async function sendText(text)
+{
+    if(!characteristic)
+        return;
 
-        setStatus("Connecting...");
+    try
+    {
+        const data =
+            new TextEncoder().encode(text);
 
-        if(stream){
-            stream.getTracks().forEach(track => track.stop());
-        }
+        await characteristic.writeValue(data);
 
-        stream =
-            await navigator.mediaDevices.getUserMedia({
-
-                video:{
-                    deviceId:{
-                        exact:cameraSelect.value
-                    },
-
-                    width:{ideal:1920},
-                    height:{ideal:1080},
-
-                    frameRate:{ideal:30}
-                },
-
-                audio:false
-            });
-
-        video.srcObject = stream;
-
-        setStatus("Camera Live");
-
-    }catch(err){
-
-        console.log(err);
-
-        setStatus("Failed");
+        log("TX > " + text);
+    }
+    catch(err)
+    {
+        log("ERROR: " + err);
     }
 }
 
-/* fullscreen */
-
-async function toggleFullscreen(){
-
-    if(!document.fullscreenElement){
-
-        await document.documentElement.requestFullscreen();
-
-    }else{
-
-        await document.exitFullscreen();
+async function disconnectBLE()
+{
+    if(device && device.gatt.connected)
+    {
+        device.gatt.disconnect();
     }
 }
 
-/* hide ui */
-
-function toggleUI(){
-
-    controls.classList.toggle('hidden');
-}
-
-/* events */
-
 document
-.getElementById('startBtn')
-.addEventListener('click', startCamera);
+.getElementById("tx")
+.addEventListener("keydown", function(e){
 
-document
-.getElementById('fullscreenBtn')
-.addEventListener('click', toggleFullscreen);
-
-document
-.getElementById('hideBtn')
-.addEventListener('click', toggleUI);
-
-/* init */
-
-async function init(){
-
-    await enableWakeLock();
-
-    await loadCameras();
-
-    setStatus("Ready");
-}
-
-init();
+    if(e.key === "Enter")
+    {
+        sendText(this.value);
+        this.value = "";
+    }
+});
 
 </script>
 
